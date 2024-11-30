@@ -30,12 +30,13 @@ def remove_sparse_columns(df: pd.DataFrame, threshold: int) -> pd.DataFrame:
 def dimensionality_reduction(df: pd.DataFrame, num_components: int, meta_columns: list[str]) -> pd.DataFrame:
     # save the metadata and save it for later use
     metadata = df[meta_columns]
+    print(metadata)
 
     # remove the metadat for the df
-    metadata_removed = df.drop(columns=meta_columns)
+    metadata_removed = df.drop(columns=meta_columns).dropna()
 
-    # standardize the data shift the data around zero
-    df_standardize = (metadata_removed - metadata.mean()) / metadata.std()
+    # standardize the data shift the data around zero and remove nones
+    df_standardize = ((metadata_removed - metadata_removed.mean()) / metadata_removed.std())
 
     # center the data around 0 and find the covariance
     cov_matrix = np.cov(df_standardize.T)
@@ -54,15 +55,16 @@ def dimensionality_reduction(df: pd.DataFrame, num_components: int, meta_columns
 
     # project the data into lower dimension plane according to the incorporate of the eigenvectors
     reduced_data = df_standardize.dot(top_eig)
+    print(reduced_data)
 
     # columns name
     columns_names = [f"PC{i+1}" for i in range(num_components)]
 
     # rename the columns to pc1, pc2 ...
-    reduced_dg = pd.DataFrame(reduced_data, columns=columns_names)
-
+    reduced_df = pd.DataFrame(reduced_data, columns=columns_names)
+    print(reduced_df)
     # combine the metadata with the reduced dataframe
-    final_df = pd.concat([metadata_removed.reset_index(drop=True), reduced_dg], axis=1)
+    final_df = pd.concat([metadata, reduced_data], axis=1).reset_index(drop=True)
 
     return final_df
 
