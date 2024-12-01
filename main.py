@@ -2,9 +2,6 @@ import pandas as pd
 from DataFrameFromFile import load_data
 
 
-
-
-
 def group_and_aggregate_data(df: pd.DataFrame, group_by_column: str, agg_func) -> pd.DataFrame:
     try:
         agg_func = agg_func if isinstance(agg_func, str) else agg_func.__name__
@@ -16,8 +13,6 @@ def group_and_aggregate_data(df: pd.DataFrame, group_by_column: str, agg_func) -
 
 def remove_sparse_columns(df: pd.DataFrame, threshold: int) -> pd.DataFrame:
     return  df[df.sum()[df.sum() > threshold].index]
-
-
 
 
 
