@@ -1,4 +1,3 @@
-from pprint import pprint
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA #imported this just to compare with our code
@@ -74,21 +73,21 @@ def sklearn_pca(df: pd.DataFrame, num_components: int, meta_columns: list[str]) 
 
 # TODO so the reason this says that the answers are different is because of the sign of the eigenvectors which is fine since we dont care about size we care about direction. (should we change this or nah?)
 if __name__ == '__main__':
-    df = pd.DataFrame(data)
+    df_example = pd.DataFrame(data)
 
     print("Original DataFrame:")
-    print(df)
+    print(df_example)
 
-    meta_columns = ['Name', 'JobRole']
+    meta_columns_list = ['Name', 'JobRole']
 
     # Apply manual PCA
     print("\nManual PCA:")
-    manual_pca_df = dimensionality_reduction(df, 2, meta_columns)
+    manual_pca_df = dimensionality_reduction(df_example, 2, meta_columns_list)
     print(manual_pca_df)
 
     # Apply sklearn PCA
     print("\nscikit-learn PCA (for comparison):")
-    sklearn_pca_df = sklearn_pca(df, 2, meta_columns)
+    sklearn_pca_df = sklearn_pca(df_example, 2, meta_columns_list)
     print(sklearn_pca_df)
 
     if manual_pca_df.equals(sklearn_pca_df):
@@ -105,16 +104,16 @@ if __name__ == '__main__':
     print("\nOriginal DataFrame:")
     print(df_from_file)
 
-    meta_columns = ['city_name', 'ballot_code']
+    meta_columns_list = ['city_name', 'ballot_code']
 
     # Apply manual PCA
     print("\nManual PCA:")
-    manual_pca_df_from_file = dimensionality_reduction(df_from_file, 2, meta_columns)
+    manual_pca_df_from_file = dimensionality_reduction(df_from_file, 2, meta_columns_list)
     print(manual_pca_df_from_file)
 
     # Apply sklearn PCA
     print("\nscikit-learn PCA (for comparison):")
-    sklearn_pca_df_from_file = sklearn_pca(df_from_file, 2, meta_columns)
+    sklearn_pca_df_from_file = sklearn_pca(df_from_file, 2, meta_columns_list)
     print(sklearn_pca_df_from_file)
 
     if sklearn_pca_df_from_file.equals(manual_pca_df_from_file):
