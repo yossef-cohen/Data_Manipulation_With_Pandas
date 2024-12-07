@@ -5,7 +5,6 @@ from matplotlib import pylab as plt
 from PCA import dimensionality_reduction
 
 
-# TODO need to ask boris if we need to reset the index with .reset_index() or not
 def group_and_aggregate_data(df: pd.DataFrame, group_by_column: str, agg_func) -> pd.DataFrame:
     try:
         agg_func = agg_func if isinstance(agg_func, str) else agg_func.__name__
@@ -16,16 +15,14 @@ def group_and_aggregate_data(df: pd.DataFrame, group_by_column: str, agg_func) -
 
 
 def remove_sparse_columns(df: pd.DataFrame, threshold: int) -> pd.DataFrame:
-    return  df[df.sum()[df.sum() > threshold].index]
+    return df[df.sum()[df.sum() > threshold].index]
 
 
-# TODO need to ask boris for how to use the labels
 aggregated_df = group_and_aggregate_data(load_data("knesset_25.xlsx"), "city_name", "sum")
 removed_df = remove_sparse_columns(aggregated_df, 1000)
 dr_df = dimensionality_reduction(removed_df, 2, ['party_avoda'])
 
 labels = list(range(len(dr_df.index)))
-
 plt.figure(figsize=(6, 6))
 for cluster in np.unique(labels):
     cluster_data = dr_df[labels == cluster]

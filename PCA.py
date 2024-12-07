@@ -52,6 +52,7 @@ def dimensionality_reduction(df: pd.DataFrame, num_components: int, meta_columns
 
     return final_df
 
+
 # this function fully from chatGPT just for testing purposes
 def sklearn_pca(df: pd.DataFrame, num_components: int, meta_columns: list[str]) -> pd.DataFrame:
     # Save metadata
