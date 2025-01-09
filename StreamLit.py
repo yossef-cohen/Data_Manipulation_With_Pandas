@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+from numpy.ma.core import nonzero
+
 from PCA import dimensionality_reduction
 
 
@@ -15,8 +17,10 @@ def setup_page():
 
 
 def handle_file_upload():
-    """Handle file upload and data loading"""
+    """Handle file upload and data loading with error handling."""
     st.header("1. העלאת נתונים")
+
+    # File uploader supports CSV and Excel files
     uploaded_file = st.file_uploader(
         "העלה קובץ נתונים",
         type=['csv', 'xlsx', 'xls'],
@@ -28,18 +32,28 @@ def handle_file_upload():
         return None
 
     try:
-        if uploaded_file.name.endswith('csv'):
+        # Determine file type and load data
+        if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
 
+        # Check for the required column
         if 'city_name' not in df.columns:
             st.error("הקובץ חייב להכיל עמודה בשם 'city_name'")
             return None
 
+        # Successfully loaded data
         return df
+
+    except pd.errors.ParserError:
+        st.error("שגיאה בניתוח הקובץ. ודא שקובץ ה-CSV תקין.")
+        return None
+    except ValueError:
+        st.error("שגיאה בעיבוד הקובץ. ודא שקובץ ה-Excel תקין.")
+        return None
     except Exception as e:
-        st.error(f"שגיאה בטעינת הקובץ: {str(e)}")
+        st.error(f"שגיאה בלתי צפויה: {str(e)}")
         return None
 
 
@@ -56,10 +70,8 @@ def get_analysis_params(df):
             help="בחר את אופן הניתוח הרצוי"
         )
 
-        group_options = {
-            'city_name': 'קיבוץ לפי עיר',
-            'ballot_code': 'קיבוץ לפי קלפי'
-        }
+        group_options = {col: f"{col}" for col in df.columns}
+
         group_by = st.selectbox(
             "בחר שדה לקיבוץ",
             options=list(group_options.keys()),
@@ -70,7 +82,8 @@ def get_analysis_params(df):
         agg_options = {
             "sum": "סכום קולות",
             "mean": "ממוצע קולות",
-            "median": "חציון קולות"
+            "median": "חציון קולות",
+            "min": "Minimum"
         }
         agg_func = st.selectbox(
             "פונקציית אגרגציה",
@@ -107,9 +120,10 @@ def process_data_for_pca(df, group_by, agg_func, threshold):
             aggregated = df.groupby(group_by).agg(agg_func)
 
         # Step 2: Remove sparse columns
-        col_sums = aggregated.sum()
+        numeric_aggregated = aggregated.select_dtypes(include=['number'])  # Keep only numeric columns
+        col_sums = numeric_aggregated.sum()
         significant_cols = col_sums[col_sums > threshold].index
-        filtered_df = aggregated[significant_cols]
+        filtered_df = numeric_aggregated[significant_cols]
 
         # Debug information
         st.write("Data processing steps:")
@@ -187,30 +201,45 @@ def interpret_pca_components(original_df, pca_result):
                 st.write(f"{idx}: {extreme_points.loc[idx, pc]:.2f}")
 
 
-def visualize_pca_results(df, n_components=2):
+def visualize_pca_results(df, n_components):
     """Visualize PCA results with interpretation"""
     try:
         # Apply PCA using the original implementation
         meta_columns = []  # No metadata columns since we've already processed the data
         pca_result = dimensionality_reduction(df, n_components, meta_columns)
 
-        # Create the visualization
-        fig = px.scatter(
-            pca_result,
-            x='PC1',
-            y='PC2',
-            text=pca_result.index,
-            title="מפת פיזור של נתוני הבחירות",
-            labels={'PC1': 'רכיב ראשון', 'PC2': 'רכיב שני'}
-        )
+        # Ensure complex numbers are converted to real if present
+        if pca_result.select_dtypes(include=['complex']).size > 0:
+            pca_result = pca_result.apply(lambda col: col.map(lambda x: x.real) if col.dtype == 'complex' else col)
 
-        # Update the layout
+        # 3D Visualization if n_components is 3
+        if n_components == 3:
+            fig = px.scatter_3d(
+                pca_result,
+                x='PC1',
+                y='PC2',
+                z='PC3',
+                text=pca_result.index,
+                title="מפת פיזור תלת-ממדית של נתוני הבחירות",
+                labels={'PC1': 'רכיב ראשון', 'PC2': 'רכיב שני', 'PC3': 'רכיב שלישי'}
+            )
+        else:
+            # 2D Visualization for n_components = 2
+            fig = px.scatter(
+                pca_result,
+                x='PC1',
+                y='PC2',
+                text=pca_result.index,
+                title="מפת פיזור של נתוני הבחירות",
+                labels={'PC1': 'רכיב ראשון', 'PC2': 'רכיב שני'}
+            )
+
+        # Update layout and marker settings
         fig.update_traces(
             textposition='top center',
             marker=dict(size=12, opacity=0.7),
             mode='markers+text'
         )
-
         fig.update_layout(
             height=700,
             template='plotly_white',
@@ -221,8 +250,9 @@ def visualize_pca_results(df, n_components=2):
         # Display the plot
         st.plotly_chart(fig, use_container_width=True)
 
-        # Interpret the components
-        interpret_pca_components(df, pca_result)
+        # Interpret the components only for 2D PCA
+        if n_components == 2:
+            interpret_pca_components(df, pca_result)
 
         return pca_result
 
@@ -237,61 +267,90 @@ def visualize_pca_results(df, n_components=2):
 def main():
     setup_page()
 
-    # Handle file upload
+    # Handle file upload and save data in session state
+    if "uploaded_data" not in st.session_state:
+        st.session_state.uploaded_data = None
+
     df = handle_file_upload()
-    if df is None:
+    if df is not None:
+        st.session_state.uploaded_data = df
+
+    # Ensure data is loaded before proceeding
+    if st.session_state.uploaded_data is None:
         return
 
-    # Show full data table
+    # Display loaded data
     st.subheader("הנתונים שנטענו")
-    st.dataframe(df, use_container_width=True, height=400)
+    st.dataframe(st.session_state.uploaded_data, use_container_width=True, height=400)
 
-    # Get analysis parameters
-    analysis_type, group_by, agg_func, n_components, threshold = get_analysis_params(df)
+    # Collect parameters and store them in session state
+    st.header("2. הגדרת פרמטרים")
 
-    if st.button("עבד נתונים", key="process_button"):
-        # Process data using the temporary handler
-        processed_df = process_data_for_pca(df, group_by, agg_func, threshold)
+    if "params" not in st.session_state:
+        st.session_state.params = {
+            "analysis_type": "ניתוח לפי ערים",
+            "group_by": "city_name",
+            "agg_func": "sum",
+            "n_components": 2,
+            "threshold": 1000,
+        }
 
-        if processed_df is None:
-            st.error("שגיאה בעיבוד הנתונים")
-            return
+    # Input widgets for analysis parameters
+    with st.form("parameter_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.params["analysis_type"] = st.radio(
+                "סוג ניתוח",
+                ["ניתוח לפי ערים", "ניתוח לפי מפלגות"],
+                help="בחר את אופן הניתוח הרצוי"
+            )
+            st.session_state.params["group_by"] = st.selectbox(
+                "בחר שדה לקיבוץ",
+                options=st.session_state.uploaded_data.columns
+            )
 
-        # Show the shape of the processed data
-        st.write(f"מספר שורות בטבלה המסוננת: {processed_df.shape[0]}")
-        st.write(f"מספר עמודות בטבלה המסוננת: {processed_df.shape[1]}")
+        with col2:
+            st.session_state.params["agg_func"] = st.selectbox(
+                "פונקציית אגרגציה",
+                ["sum", "mean", "median", "min"],
+                format_func=lambda x: {"sum": "סכום קולות", "mean": "ממוצע קולות", "median": "חציון קולות", "min": "Minimum"}[x]
+            )
+            st.session_state.params["n_components"] = st.radio(
+                "מספר רכיבים",
+                [2, 3],
+                format_func=lambda x: f"{x}D תצוגה"
+            )
 
-        # Transpose data if analyzing by party
-        if analysis_type == "ניתוח לפי מפלגות":
-            processed_df = processed_df.T
-            st.write("(הנתונים הועברו - ניתוח לפי מפלגות)")
+        st.session_state.params["threshold"] = st.slider(
+            "סף מינימום לקולות",
+            min_value=0,
+            max_value=10000,
+            value=1000,
+            step=100,
+            help="סינון מפלגות/ערים עם פחות קולות מהסף שנבחר"
+        )
 
-        # Visualize the results
-        pca_result = visualize_pca_results(processed_df, n_components)
+        # Submit button for the form
+        submitted = st.form_submit_button("עבד נתונים")
 
-        if pca_result is not None:
-            # Add download buttons
-            col1, col2 = st.columns(2)
+    # Process data and visualize results only after form submission
+    if submitted:
+        processed_df = process_data_for_pca(
+            st.session_state.uploaded_data,
+            st.session_state.params["group_by"],
+            st.session_state.params["agg_func"],
+            st.session_state.params["threshold"]
+        )
 
-            with col1:
-                processed_csv = processed_df.to_csv(index=True)
-                st.download_button(
-                    "הורד נתונים מעובדים (CSV)",
-                    processed_csv,
-                    "processed_election_data.csv",
-                    "text/csv",
-                    key='download-processed-csv'
-                )
+        if processed_df is not None:
+            # Transpose data if analyzing by party
+            if st.session_state.params["analysis_type"] == "ניתוח לפי מפלגות":
+                processed_df = processed_df.T
+                st.write("(הנתונים הועברו - ניתוח לפי מפלגות)")
 
-            with col2:
-                pca_csv = pca_result.to_csv(index=True)
-                st.download_button(
-                    "הורד נתונים מופחתי ממדים (CSV)",
-                    pca_csv,
-                    "reduced_election_data.csv",
-                    "text/csv",
-                    key='download-reduced-csv'
-                )
+            # Visualize the results
+            visualize_pca_results(processed_df, st.session_state.params["n_components"])
+
 
 
 if __name__ == "__main__":
