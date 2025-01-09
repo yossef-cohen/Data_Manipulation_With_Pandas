@@ -131,58 +131,6 @@ def get_analysis_params(df):
         return None
 
 
-def process_data_for_pca(df, group_by, agg_func, threshold):
-    """Process data for PCA while preserving the original structure."""
-    try:
-        # Step 1: Group and aggregate data
-        if group_by == 'city_name':
-            if 'ballot_code' in df.columns:
-                df = df.drop(columns='ballot_code')
-            aggregated = df.groupby(group_by).agg(agg_func)
-        else:
-            aggregated = df.groupby(group_by).agg(agg_func)
-
-        # Step 2: Handle missing and invalid values
-        numeric_aggregated = aggregated.select_dtypes(include=['number']).fillna(0)
-
-        # Replace extremely large values with a cap (e.g., 1e9)
-        numeric_aggregated = numeric_aggregated.clip(upper=1e9)
-
-        # Replace inf and NaN values
-        numeric_aggregated.replace([np.inf, -np.inf], np.nan, inplace=True)
-        numeric_aggregated.dropna(axis=0, how='any', inplace=True)  # Drop rows with NaN
-        numeric_aggregated.dropna(axis=1, how='any', inplace=True)  # Drop columns with NaN
-
-        # Filter columns based on threshold
-        col_sums = numeric_aggregated.sum()
-        significant_cols = col_sums[col_sums > threshold].index
-        filtered_df = numeric_aggregated[significant_cols]
-
-        # Ensure enough columns for PCA
-        if filtered_df.shape[1] < 2:
-            st.error("Not enough valid data after filtering to perform PCA.")
-            return None
-
-        # Normalize data for PCA to avoid numerical instability
-        filtered_df = (filtered_df - filtered_df.mean()) / filtered_df.std()
-
-        # Debug information
-        st.write("Data processing steps:")
-        st.write(f"- Original shape: {df.shape}")
-        st.write(f"- After aggregation: {aggregated.shape}")
-        st.write(f"- After filtering: {filtered_df.shape}")
-
-        # Display the filtered data table
-        st.subheader("Filtered Data")
-        st.dataframe(filtered_df, use_container_width=True, height=400, hide_index=False)
-
-        return filtered_df
-
-    except Exception as e:
-        st.error(f"Error in data processing: {str(e)}")
-        return None
-
-
 def interpret_pca_components(original_df, pca_result):
     """Interpret what each principal component represents"""
     st.subheader("Principal Component Analysis Interpretation")
@@ -237,76 +185,115 @@ def interpret_pca_components(original_df, pca_result):
                 st.write(f"{idx}: {extreme_points.loc[idx, pc]:.2f}")
 
 
-def visualize_pca_results(df, n_components):
-    """Visualize PCA results with interpretation"""
+def process_data_for_pca(df, group_by, agg_func, threshold):
+    """Process data for PCA with robust error handling."""
     try:
-        # Apply PCA using the original implementation
-        meta_columns = []  # No metadata columns since we've already processed the data
-        pca_result = dimensionality_reduction(df, n_components, meta_columns)
+        # Clean and prepare data
+        working_df = df.copy()
+        numeric_df = working_df.select_dtypes(include=['number'])
 
-        # Ensure complex numbers are converted to real if present
-        if pca_result.select_dtypes(include=['complex']).size > 0:
-            pca_result = pca_result.apply(lambda col: col.map(lambda x: x.real) if col.dtype == 'complex' else col)
+        if group_by == 'city_name' and 'ballot_code' in working_df.columns:
+            working_df = working_df.drop(columns='ballot_code')
 
-        # Reverse text for proper RTL display
-        def reverse_hebrew_text(text):
-            return ''.join(reversed(text)) if any("\u0590" <= c <= "\u05FF" for c in text) else text
+        # Handle non-numeric columns
+        for col in working_df.columns:
+            if col not in numeric_df.columns and col != group_by:
+                working_df[col] = pd.to_numeric(working_df[col], errors='coerce')
 
-        pca_result['reversed_text'] = pca_result.index.map(reverse_hebrew_text)
-        pca_result['original_text'] = pca_result.index  # Keep original text for tooltips
+        # Group and aggregate
+        if agg_func in ['var', 'std']:
+            aggregated = numeric_df.groupby(working_df[group_by]).agg(
+                lambda x: x.agg(agg_func) if len(x.dropna()) > 1 else 0
+            )
+        else:
+            aggregated = numeric_df.groupby(working_df[group_by]).agg(agg_func)
 
-        # 3D Visualization if n_components is 3
+        # Clean aggregated data
+        aggregated = aggregated.replace([np.inf, -np.inf], 0)
+        aggregated = aggregated.fillna(0)
+
+        # Filter based on threshold
+        col_sums = aggregated.sum()
+        filtered_df = aggregated[col_sums[col_sums > threshold].index]
+
+        if filtered_df.shape[1] < 2:
+            st.error(f"Insufficient data after threshold filtering ({threshold})")
+            return None
+
+        # Display the filtered data table
+        st.subheader("Filtered Data")
+        st.dataframe(filtered_df, use_container_width=True, height=400)
+
+        return filtered_df.astype(float)
+
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
+        return None
+
+
+def visualize_pca_results(df, n_components):
+    """Visualize PCA results."""
+    try:
+        if df is None or df.empty:
+            raise ValueError("Empty input data")
+
+        # Ensure clean numeric data
+        df = df.astype(float)
+        if df.isnull().any().any() or np.isinf(df.values).any():
+            df = df.replace([np.inf, -np.inf], 0).fillna(0)
+
+        # Apply PCA
+        pca_result = dimensionality_reduction(df, n_components, [])
+
+        # Convert to real numbers and clean
+        pca_result = pd.DataFrame(
+            np.real(pca_result.values),
+            index=pca_result.index.astype(str),
+            columns=pca_result.columns
+        ).replace([np.inf, -np.inf], 0).fillna(0)
+
+        # Add text handling
+        pca_result['reversed_text'] = pca_result.index.map(
+            lambda x: ''.join(reversed(x)) if any("\u0590" <= c <= "\u05FF" for c in x) else x
+        )
+        pca_result['original_text'] = pca_result.index
+
+        # Create visualization
         if n_components == 3:
             fig = px.scatter_3d(
                 pca_result,
-                x='PC1',
-                y='PC2',
-                z='PC3',
-                text='reversed_text',  # Use reversed text for graph labels
-                hover_name='original_text',  # Use original text for tooltips
-                title="3D Scatter Plot of Election Data",
-                labels={'PC1': 'First Component', 'PC2': 'Second Component', 'PC3': 'Third Component'}
+                x='PC1', y='PC2', z='PC3',
+                text='reversed_text',
+                hover_name='original_text',
+                title="3D PCA Visualization"
             )
         else:
-            # 2D Visualization for n_components = 2
             fig = px.scatter(
                 pca_result,
-                x='PC1',
-                y='PC2',
-                text='reversed_text',  # Use reversed text for graph labels
-                hover_name='original_text',  # Use original text for tooltips
-                title="2D Scatter Plot of Election Data",
-                labels={'PC1': 'First Component', 'PC2': 'Second Component'},
+                x='PC1', y='PC2',
+                text='reversed_text',
+                hover_name='original_text',
+                title="2D PCA Visualization"
             )
 
-        # Update layout and marker settings
         fig.update_traces(
             textposition='top center',
-            marker=dict(size=12, opacity=0.7, color='blue'),  # Set marker color to black
-            mode='markers+text',
-            textfont=dict(color='red', family='Arial')  # Set text color to black and ensure proper font
-        )
-        fig.update_layout(
-            height=700,
-            template='plotly_white',
-            showlegend=False,
-            margin=dict(l=20, r=20, t=40, b=20)
+            marker=dict(size=12, opacity=0.7, color='black'),
+            mode='markers+text'
         )
 
-        # Display the plot
         st.plotly_chart(fig, use_container_width=True)
 
-        # Interpret the components only for 2D PCA
-        if n_components == 2:
-            interpret_pca_components(df, pca_result)
+        # Display PCA results table
+        st.subheader("PCA Results")
+        st.dataframe(pca_result.drop(['reversed_text', 'original_text'], axis=1),
+                     use_container_width=True,
+                     height=400)
 
         return pca_result
 
     except Exception as e:
-        st.error(f"Error in visualization: {str(e)}")
-        st.write("Debug information:")
-        st.write("Input data shape:", df.shape)
-        st.write("Input data columns:", df.columns.tolist())
+        st.error(f"Visualization error: {str(e)}")
         return None
 
 
