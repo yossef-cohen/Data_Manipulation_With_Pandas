@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from numpy.ma.core import nonzero
-
 from PCA import dimensionality_reduction
 
 
@@ -13,22 +12,22 @@ def setup_page():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    st.title("ניתוח נתוני בחירות")
+    st.title("Election Data Analysis")
 
 
 def handle_file_upload():
     """Handle file upload and data loading with error handling."""
-    st.header("1. העלאת נתונים")
+    st.header("1. Upload Data")
 
     # File uploader supports CSV and Excel files
     uploaded_file = st.file_uploader(
-        "העלה קובץ נתונים",
+        "Upload a data file",
         type=['csv', 'xlsx', 'xls'],
-        help="תומך בקבצי CSV ו-Excel"
+        help="Supports CSV and Excel files"
     )
 
     if uploaded_file is None:
-        st.info("אנא העלה קובץ נתונים להתחלת הניתוח")
+        st.info("Please upload a data file to start the analysis")
         return None
 
     try:
@@ -40,78 +39,87 @@ def handle_file_upload():
 
         # Check for the required column
         if 'city_name' not in df.columns:
-            st.error("הקובץ חייב להכיל עמודה בשם 'city_name'")
+            st.error("The file must contain a 'city_name' column")
             return None
 
         # Successfully loaded data
         return df
 
     except pd.errors.ParserError:
-        st.error("שגיאה בניתוח הקובץ. ודא שקובץ ה-CSV תקין.")
+        st.error("Error parsing the file. Ensure the CSV file is valid.")
         return None
     except ValueError:
-        st.error("שגיאה בעיבוד הקובץ. ודא שקובץ ה-Excel תקין.")
+        st.error("Error processing the file. Ensure the Excel file is valid.")
         return None
     except Exception as e:
-        st.error(f"שגיאה בלתי צפויה: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
         return None
 
 
 def get_analysis_params(df):
     """Get analysis parameters from user input"""
-    st.header("2. הגדרת פרמטרים")
+    st.header("2. Set Parameters")
 
     col1, col2 = st.columns(2)
 
     with col1:
         analysis_type = st.radio(
-            "סוג ניתוח",
-            ["ניתוח לפי ערים", "ניתוח לפי מפלגות"],
-            help="בחר את אופן הניתוח הרצוי"
+            "Analysis Type",
+            ["Analysis by Cities", "Analysis by Parties"],
+            help="Choose the desired analysis type"
         )
 
         group_options = {col: f"{col}" for col in df.columns}
 
         group_by = st.selectbox(
-            "בחר שדה לקיבוץ",
+            "Select Grouping Field",
             options=list(group_options.keys()),
             format_func=lambda x: group_options[x]
         )
 
     with col2:
         agg_options = {
-            "sum": "סכום קולות",
-            "mean": "ממוצע קולות",
-            "median": "חציון קולות",
-            "min": "Minimum"
+            "sum": "Sum of Votes",  # Calculates the sum of all values
+            "mean": "Average Votes",  # Calculates the average (mean) of values
+            "median": "Median Votes",  # Finds the median (middle value)
+            "min": "Minimum Votes",  # Finds the minimum value
+            "max": "Maximum Votes",  # Finds the maximum value
+            "count": "Count of Entries",  # Counts the number of non-null entries
+            "std": "Standard Deviation of Votes",  # Calculates the standard deviation
+            "var": "Variance of Votes",  # Calculates the variance
+            "first": "First Entry",  # Retrieves the first entry in each group
+            "last": "Last Entry",  # Retrieves the last entry in each group
+            "prod": "Product of Votes",  # Calculates the product of all values
+            "mode": "Mode of Votes"  # Finds the most frequently occurring value
         }
+
         agg_func = st.selectbox(
-            "פונקציית אגרגציה",
+            "Aggregation Function",
             options=list(agg_options.keys()),
             format_func=lambda x: agg_options[x]
         )
 
         num_components = st.radio(
-            "מספר רכיבים",
+            "Number of Components",
             [2, 3],
-            format_func=lambda x: f"{x}D תצוגה",
-            help="בחר מספר ממדים להצגת התוצאות"
+            format_func=lambda x: f"{x}D View",
+            help="Select the number of dimensions for visualization"
         )
 
     threshold = st.slider(
-        "סף מינימום לקולות",
+        "Minimum Vote Threshold",
         min_value=0,
         max_value=10000,
         value=1000,
         step=100,
-        help="סינון מפלגות/ערים עם פחות קולות מהסף שנבחר"
+        help="Filter cities/parties with fewer votes than the selected threshold"
     )
 
     return analysis_type, group_by, agg_func, num_components, threshold
 
 
 def process_data_for_pca(df, group_by, agg_func, threshold):
-    """Process data for PCA while preserving the original structure"""
+    """Process data for PCA while preserving the original structure."""
     try:
         # Step 1: Group and aggregate data
         if group_by == 'city_name':
@@ -119,8 +127,8 @@ def process_data_for_pca(df, group_by, agg_func, threshold):
         else:
             aggregated = df.groupby(group_by).agg(agg_func)
 
-        # Step 2: Remove sparse columns
-        numeric_aggregated = aggregated.select_dtypes(include=['number'])  # Keep only numeric columns
+        # Step 2: Remove non-numeric columns for PCA
+        numeric_aggregated = aggregated.select_dtypes(include=['number'])
         col_sums = numeric_aggregated.sum()
         significant_cols = col_sums[col_sums > threshold].index
         filtered_df = numeric_aggregated[significant_cols]
@@ -132,13 +140,8 @@ def process_data_for_pca(df, group_by, agg_func, threshold):
         st.write(f"- After filtering: {filtered_df.shape}")
 
         # Display the filtered data table
-        st.subheader("נתונים מסוננים")
-        st.dataframe(
-            filtered_df,
-            use_container_width=True,
-            height=400,
-            hide_index=False
-        )
+        st.subheader("Filtered Data")
+        st.dataframe(filtered_df, use_container_width=True, height=400, hide_index=False)
 
         return filtered_df
 
@@ -149,7 +152,7 @@ def process_data_for_pca(df, group_by, agg_func, threshold):
 
 def interpret_pca_components(original_df, pca_result):
     """Interpret what each principal component represents"""
-    st.subheader("ניתוח משמעות הרכיבים העיקריים")
+    st.subheader("Principal Component Analysis Interpretation")
 
     # Calculate correlations between original variables and PCs
     correlations = pd.DataFrame(index=original_df.columns)
@@ -167,36 +170,36 @@ def interpret_pca_components(original_df, pca_result):
     col1, col2 = st.columns(2)
 
     with col1:
-        st.write("מתאמים עם רכיב ראשון (PC1):")
+        st.write("Correlations with First Component (PC1):")
         for var in pc1_correlations.head(5).index:
             correlation = correlations.loc[var, 'PC1']
-            direction = "חיובי" if correlation > 0 else "שלילי"
-            st.write(f"{var}: {abs(correlation):.3f} (מתאם {direction})")
+            direction = "Positive" if correlation > 0 else "Negative"
+            st.write(f"{var}: {abs(correlation):.3f} ({direction} correlation)")
 
     with col2:
-        st.write("מתאמים עם רכיב שני (PC2):")
+        st.write("Correlations with Second Component (PC2):")
         for var in pc2_correlations.head(5).index:
             correlation = correlations.loc[var, 'PC2']
-            direction = "חיובי" if correlation > 0 else "שלילי"
-            st.write(f"{var}: {abs(correlation):.3f} (מתאם {direction})")
+            direction = "Positive" if correlation > 0 else "Negative"
+            st.write(f"{var}: {abs(correlation):.3f} ({direction} correlation)")
 
     # Find extreme points
-    st.subheader("נקודות קיצון")
+    st.subheader("Extreme Points")
 
     # Get top and bottom 3 points for each PC
     for pc in ['PC1', 'PC2']:
-        st.write(f"נקודות קיצון עבור {pc}:")
+        st.write(f"Extreme Points for {pc}:")
         extreme_points = pca_result.sort_values(by=pc)
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.write("ערכים נמוכים:")
+            st.write("Low Values:")
             for idx in extreme_points.head(3).index:
                 st.write(f"{idx}: {extreme_points.loc[idx, pc]:.2f}")
 
         with col2:
-            st.write("ערכים גבוהים:")
+            st.write("High Values:")
             for idx in extreme_points.tail(3).index:
                 st.write(f"{idx}: {extreme_points.loc[idx, pc]:.2f}")
 
@@ -220,8 +223,8 @@ def visualize_pca_results(df, n_components):
                 y='PC2',
                 z='PC3',
                 text=pca_result.index,
-                title="מפת פיזור תלת-ממדית של נתוני הבחירות",
-                labels={'PC1': 'רכיב ראשון', 'PC2': 'רכיב שני', 'PC3': 'רכיב שלישי'}
+                title="3D Scatter Plot of Election Data",
+                labels={'PC1': 'First Component', 'PC2': 'Second Component', 'PC3': 'Third Component'}
             )
         else:
             # 2D Visualization for n_components = 2
@@ -230,8 +233,8 @@ def visualize_pca_results(df, n_components):
                 x='PC1',
                 y='PC2',
                 text=pca_result.index,
-                title="מפת פיזור של נתוני הבחירות",
-                labels={'PC1': 'רכיב ראשון', 'PC2': 'רכיב שני'}
+                title="2D Scatter Plot of Election Data",
+                labels={'PC1': 'First Component', 'PC2': 'Second Component'}
             )
 
         # Update layout and marker settings
@@ -280,15 +283,15 @@ def main():
         return
 
     # Display loaded data
-    st.subheader("הנתונים שנטענו")
+    st.subheader("Loaded Data")
     st.dataframe(st.session_state.uploaded_data, use_container_width=True, height=400)
 
     # Collect parameters and store them in session state
-    st.header("2. הגדרת פרמטרים")
+    st.header("2. Set Parameters")
 
     if "params" not in st.session_state:
         st.session_state.params = {
-            "analysis_type": "ניתוח לפי ערים",
+            "analysis_type": "Analysis by Cities",
             "group_by": "city_name",
             "agg_func": "sum",
             "n_components": 2,
@@ -300,38 +303,38 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.session_state.params["analysis_type"] = st.radio(
-                "סוג ניתוח",
-                ["ניתוח לפי ערים", "ניתוח לפי מפלגות"],
-                help="בחר את אופן הניתוח הרצוי"
+                "Analysis Type",
+                ["Analysis by Cities", "Analysis by Parties"],
+                help="Choose the desired analysis type"
             )
             st.session_state.params["group_by"] = st.selectbox(
-                "בחר שדה לקיבוץ",
+                "Select Grouping Field",
                 options=st.session_state.uploaded_data.columns
             )
 
         with col2:
             st.session_state.params["agg_func"] = st.selectbox(
-                "פונקציית אגרגציה",
+                "Aggregation Function",
                 ["sum", "mean", "median", "min"],
-                format_func=lambda x: {"sum": "סכום קולות", "mean": "ממוצע קולות", "median": "חציון קולות", "min": "Minimum"}[x]
+                format_func=lambda x: {"sum": "Sum of Votes", "mean": "Average Votes", "median": "Median Votes", "min": "Minimum Votes"}[x]
             )
             st.session_state.params["n_components"] = st.radio(
-                "מספר רכיבים",
+                "Number of Components",
                 [2, 3],
-                format_func=lambda x: f"{x}D תצוגה"
+                format_func=lambda x: f"{x}D View"
             )
 
         st.session_state.params["threshold"] = st.slider(
-            "סף מינימום לקולות",
+            "Minimum Vote Threshold",
             min_value=0,
             max_value=10000,
             value=1000,
             step=100,
-            help="סינון מפלגות/ערים עם פחות קולות מהסף שנבחר"
+            help="Filter cities/parties with fewer votes than the selected threshold"
         )
 
         # Submit button for the form
-        submitted = st.form_submit_button("עבד נתונים")
+        submitted = st.form_submit_button("Process Data")
 
     # Process data and visualize results only after form submission
     if submitted:
@@ -344,13 +347,12 @@ def main():
 
         if processed_df is not None:
             # Transpose data if analyzing by party
-            if st.session_state.params["analysis_type"] == "ניתוח לפי מפלגות":
+            if st.session_state.params["analysis_type"] == "Analysis by Parties":
                 processed_df = processed_df.T
-                st.write("(הנתונים הועברו - ניתוח לפי מפלגות)")
+                st.write("(Data Transposed - Analysis by Parties)")
 
             # Visualize the results
             visualize_pca_results(processed_df, st.session_state.params["n_components"])
-
 
 
 if __name__ == "__main__":
