@@ -3,7 +3,22 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from numpy.ma.core import nonzero
+
 from PCA import dimensionality_reduction
+
+AGG_OPTIONS = {
+    "sum": "Sum of Votes",
+    "mean": "Average Votes",
+    "median": "Median Votes",
+    "min": "Minimum Votes",
+    "max": "Maximum Votes",
+    "count": "Count of Entries",
+    "std": "Standard Deviation of Votes",
+    "var": "Variance of Votes",
+    "first": "First Entry",
+    "last": "Last Entry",
+    "prod": "Product of Votes"
+}
 
 
 def setup_page():
@@ -33,7 +48,7 @@ def handle_file_upload():
     try:
         # Determine file type and load data
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(uploaded_file, encoding="utf-8")
         else:
             df = pd.read_excel(uploaded_file)
 
@@ -57,65 +72,63 @@ def handle_file_upload():
 
 
 def get_analysis_params(df):
-    """Get analysis parameters from user input"""
+    """Get analysis parameters from user input using a form."""
     st.header("2. Set Parameters")
 
-    col1, col2 = st.columns(2)
+    with st.form("parameter_form"):
+        col1, col2 = st.columns(2)
 
-    with col1:
-        analysis_type = st.radio(
-            "Analysis Type",
-            ["Analysis by Cities", "Analysis by Parties"],
-            help="Choose the desired analysis type"
+        with col1:
+            analysis_type = st.radio(
+                "Analysis Type",
+                ["Analysis by Cities", "Analysis by Parties"],
+                help="Choose the desired analysis type"
+            )
+
+            group_by = st.selectbox(
+                "Select Grouping Field",
+                options=df.columns,
+                help="Choose the field to group by"
+            )
+
+        with col2:
+            agg_func = st.selectbox(
+                "Aggregation Function",
+                options=list(AGG_OPTIONS.keys()),
+                format_func=lambda x: AGG_OPTIONS[x],
+                help="Choose the aggregation function"
+            )
+
+            num_components = st.radio(
+                "Number of Components",
+                [2, 3],
+                format_func=lambda x: f"{x}D View",
+                help="Select the number of dimensions for visualization"
+            )
+
+        threshold = st.slider(
+            "Minimum Vote Threshold",
+            min_value=0,
+            max_value=10000,
+            value=1000,
+            step=100,
+            help="Filter cities/parties with fewer votes than the selected threshold"
         )
 
-        group_options = {col: f"{col}" for col in df.columns}
+        # Form submission button
+        submitted = st.form_submit_button("Submit")
 
-        group_by = st.selectbox(
-            "Select Grouping Field",
-            options=list(group_options.keys()),
-            format_func=lambda x: group_options[x]
-        )
-
-    with col2:
-        agg_options = {
-            "sum": "Sum of Votes",  # Calculates the sum of all values
-            "mean": "Average Votes",  # Calculates the average (mean) of values
-            "median": "Median Votes",  # Finds the median (middle value)
-            "min": "Minimum Votes",  # Finds the minimum value
-            "max": "Maximum Votes",  # Finds the maximum value
-            "count": "Count of Entries",  # Counts the number of non-null entries
-            "std": "Standard Deviation of Votes",  # Calculates the standard deviation
-            "var": "Variance of Votes",  # Calculates the variance
-            "first": "First Entry",  # Retrieves the first entry in each group
-            "last": "Last Entry",  # Retrieves the last entry in each group
-            "prod": "Product of Votes",  # Calculates the product of all values
-            "mode": "Mode of Votes"  # Finds the most frequently occurring value
+    # Return parameters only if the form is submitted
+    if submitted:
+        return {
+            "analysis_type": analysis_type,
+            "group_by": group_by,
+            "agg_func": agg_func,
+            "num_components": num_components,
+            "threshold": threshold
         }
-
-        agg_func = st.selectbox(
-            "Aggregation Function",
-            options=list(agg_options.keys()),
-            format_func=lambda x: agg_options[x]
-        )
-
-        num_components = st.radio(
-            "Number of Components",
-            [2, 3],
-            format_func=lambda x: f"{x}D View",
-            help="Select the number of dimensions for visualization"
-        )
-
-    threshold = st.slider(
-        "Minimum Vote Threshold",
-        min_value=0,
-        max_value=10000,
-        value=1000,
-        step=100,
-        help="Filter cities/parties with fewer votes than the selected threshold"
-    )
-
-    return analysis_type, group_by, agg_func, num_components, threshold
+    else:
+        return None
 
 
 def process_data_for_pca(df, group_by, agg_func, threshold):
@@ -123,15 +136,35 @@ def process_data_for_pca(df, group_by, agg_func, threshold):
     try:
         # Step 1: Group and aggregate data
         if group_by == 'city_name':
-            aggregated = df.drop(columns='ballot_code').groupby(group_by).agg(agg_func)
+            if 'ballot_code' in df.columns:
+                df = df.drop(columns='ballot_code')
+            aggregated = df.groupby(group_by).agg(agg_func)
         else:
             aggregated = df.groupby(group_by).agg(agg_func)
 
-        # Step 2: Remove non-numeric columns for PCA
-        numeric_aggregated = aggregated.select_dtypes(include=['number'])
+        # Step 2: Handle missing and invalid values
+        numeric_aggregated = aggregated.select_dtypes(include=['number']).fillna(0)
+
+        # Replace extremely large values with a cap (e.g., 1e9)
+        numeric_aggregated = numeric_aggregated.clip(upper=1e9)
+
+        # Replace inf and NaN values
+        numeric_aggregated.replace([np.inf, -np.inf], np.nan, inplace=True)
+        numeric_aggregated.dropna(axis=0, how='any', inplace=True)  # Drop rows with NaN
+        numeric_aggregated.dropna(axis=1, how='any', inplace=True)  # Drop columns with NaN
+
+        # Filter columns based on threshold
         col_sums = numeric_aggregated.sum()
         significant_cols = col_sums[col_sums > threshold].index
         filtered_df = numeric_aggregated[significant_cols]
+
+        # Ensure enough columns for PCA
+        if filtered_df.shape[1] < 2:
+            st.error("Not enough valid data after filtering to perform PCA.")
+            return None
+
+        # Normalize data for PCA to avoid numerical instability
+        filtered_df = (filtered_df - filtered_df.mean()) / filtered_df.std()
 
         # Debug information
         st.write("Data processing steps:")
@@ -215,6 +248,13 @@ def visualize_pca_results(df, n_components):
         if pca_result.select_dtypes(include=['complex']).size > 0:
             pca_result = pca_result.apply(lambda col: col.map(lambda x: x.real) if col.dtype == 'complex' else col)
 
+        # Reverse text for proper RTL display
+        def reverse_hebrew_text(text):
+            return ''.join(reversed(text)) if any("\u0590" <= c <= "\u05FF" for c in text) else text
+
+        pca_result['reversed_text'] = pca_result.index.map(reverse_hebrew_text)
+        pca_result['original_text'] = pca_result.index  # Keep original text for tooltips
+
         # 3D Visualization if n_components is 3
         if n_components == 3:
             fig = px.scatter_3d(
@@ -222,7 +262,8 @@ def visualize_pca_results(df, n_components):
                 x='PC1',
                 y='PC2',
                 z='PC3',
-                text=pca_result.index,
+                text='reversed_text',  # Use reversed text for graph labels
+                hover_name='original_text',  # Use original text for tooltips
                 title="3D Scatter Plot of Election Data",
                 labels={'PC1': 'First Component', 'PC2': 'Second Component', 'PC3': 'Third Component'}
             )
@@ -232,16 +273,18 @@ def visualize_pca_results(df, n_components):
                 pca_result,
                 x='PC1',
                 y='PC2',
-                text=pca_result.index,
+                text='reversed_text',  # Use reversed text for graph labels
+                hover_name='original_text',  # Use original text for tooltips
                 title="2D Scatter Plot of Election Data",
-                labels={'PC1': 'First Component', 'PC2': 'Second Component'}
+                labels={'PC1': 'First Component', 'PC2': 'Second Component'},
             )
 
         # Update layout and marker settings
         fig.update_traces(
             textposition='top center',
-            marker=dict(size=12, opacity=0.7),
-            mode='markers+text'
+            marker=dict(size=12, opacity=0.7, color='blue'),  # Set marker color to black
+            mode='markers+text',
+            textfont=dict(color='red', family='Arial')  # Set text color to black and ensure proper font
         )
         fig.update_layout(
             height=700,
@@ -286,73 +329,26 @@ def main():
     st.subheader("Loaded Data")
     st.dataframe(st.session_state.uploaded_data, use_container_width=True, height=400)
 
-    # Collect parameters and store them in session state
-    st.header("2. Set Parameters")
+    # Get analysis parameters
+    params = get_analysis_params(st.session_state.uploaded_data)
 
-    if "params" not in st.session_state:
-        st.session_state.params = {
-            "analysis_type": "Analysis by Cities",
-            "group_by": "city_name",
-            "agg_func": "sum",
-            "n_components": 2,
-            "threshold": 1000,
-        }
-
-    # Input widgets for analysis parameters
-    with st.form("parameter_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.session_state.params["analysis_type"] = st.radio(
-                "Analysis Type",
-                ["Analysis by Cities", "Analysis by Parties"],
-                help="Choose the desired analysis type"
-            )
-            st.session_state.params["group_by"] = st.selectbox(
-                "Select Grouping Field",
-                options=st.session_state.uploaded_data.columns
-            )
-
-        with col2:
-            st.session_state.params["agg_func"] = st.selectbox(
-                "Aggregation Function",
-                ["sum", "mean", "median", "min"],
-                format_func=lambda x: {"sum": "Sum of Votes", "mean": "Average Votes", "median": "Median Votes", "min": "Minimum Votes"}[x]
-            )
-            st.session_state.params["n_components"] = st.radio(
-                "Number of Components",
-                [2, 3],
-                format_func=lambda x: f"{x}D View"
-            )
-
-        st.session_state.params["threshold"] = st.slider(
-            "Minimum Vote Threshold",
-            min_value=0,
-            max_value=10000,
-            value=1000,
-            step=100,
-            help="Filter cities/parties with fewer votes than the selected threshold"
-        )
-
-        # Submit button for the form
-        submitted = st.form_submit_button("Process Data")
-
-    # Process data and visualize results only after form submission
-    if submitted:
+    if params:
+        # Process data and visualize results only after parameters are submitted
         processed_df = process_data_for_pca(
             st.session_state.uploaded_data,
-            st.session_state.params["group_by"],
-            st.session_state.params["agg_func"],
-            st.session_state.params["threshold"]
+            params["group_by"],
+            params["agg_func"],
+            params["threshold"]
         )
 
         if processed_df is not None:
             # Transpose data if analyzing by party
-            if st.session_state.params["analysis_type"] == "Analysis by Parties":
+            if params["analysis_type"] == "Analysis by Parties":
                 processed_df = processed_df.T
                 st.write("(Data Transposed - Analysis by Parties)")
 
             # Visualize the results
-            visualize_pca_results(processed_df, st.session_state.params["n_components"])
+            visualize_pca_results(processed_df, params["num_components"])
 
 
 if __name__ == "__main__":
