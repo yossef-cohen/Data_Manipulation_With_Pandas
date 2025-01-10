@@ -21,6 +21,8 @@ def dimensionality_reduction(df: pd.DataFrame, num_components: int, meta_columns
     :param meta_columns: list[str] - List of metadata columns that should not be transformed.
     :return: pd.DataFrame - DataFrame with the metadata and reduced components.
     """
+    df.fillna(0, inplace=True)
+
     # Extract metadata columns and remove them from the DataFrame
     metadata = df[meta_columns]
     metadata_removed = df.drop(columns=meta_columns)

@@ -12,15 +12,30 @@ This project contains Python scripts for performing dimensionality reduction usi
 
 ---
 
+## **Dependencies**
+
+To ensure the project works properly, install the following Python libraries:
+
+```bash
+pip install streamlit pandas numpy scikit-learn plotly openpyxl
+```
+
+### **Explanation of dependencies:**
+
+- **`streamlit`**: For building the interactive web app.
+- **`pandas`**: For data manipulation and loading CSV/Excel files.
+- **`numpy`**: For mathematical operations (e.g., eigenvalue computation).
+- **`scikit-learn`**: For comparisons with PCA implementations.
+- **`plotly`**: For creating interactive 1D, 2D, and 3D scatter plots.
+- **`openpyxl`**: Required for reading `.xlsx` Excel files.
+
+---
+
 ## **How to Run the Project**
 
 ### **1. Prerequisites**
 
-Ensure you have Python 3.x installed and the following libraries installed:
-
-```bash
-pip install streamlit pandas numpy scikit-learn plotly
-```
+Ensure you have Python 3.x installed and the required libraries listed above.
 
 ### **2. Running the Streamlit App**
 
@@ -29,7 +44,7 @@ pip install streamlit pandas numpy scikit-learn plotly
 3. Run the Streamlit app using:
 
    ```bash
-   streamlit run StreamLit.py
+   streamlit run GUI.py
    ```
 
 4. The app will open in your default web browser at `http://localhost:8501/`.
@@ -79,5 +94,23 @@ This will display the PCA results for the example data in the console.
 
 ---
 
-This README should help guide you through running the app and interacting with the UI. Let me know if you'd like any edits!
+## **Code Overview**
+
+### **1. `functions.py`**
+
+- **`load_data(filepath: str) -> pd.DataFrame`**: Loads data from CSV or Excel files into a Pandas DataFrame.
+- **`group_and_aggregate_data(df: pd.DataFrame, group_by_column: str, agg_func)`**: Groups and aggregates data based on a specified column and aggregation function.
+- **`remove_sparse_columns(df: pd.DataFrame, threshold: int)`**: Removes columns where the sum of values is below a specified threshold.
+
+### **2. `PCA.py`**
+
+- **`dimensionality_reduction(df: pd.DataFrame, num_components: int, meta_columns: list[str]) -> pd.DataFrame`**: Performs manual PCA on a DataFrame.
+  - Extracts metadata columns and standardizes numerical data.
+  - Computes the covariance matrix and eigenvectors.
+  - Projects the data into a lower-dimensional space.
+
+### **3. `StreamLit.py`**
+
+- **`display_pca_data(df: pd.DataFrame, num_components: int, label_col: str = None)`**: Visualizes PCA-reduced data in 1D, 2D, or 3D using Plotly.
+- **`main()`**: The main function that initializes the Streamlit app.
 
